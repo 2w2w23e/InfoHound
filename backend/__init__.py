@@ -1,0 +1,2 @@
+"""InfoHound backend package."""
+

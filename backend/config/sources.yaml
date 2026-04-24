@@ -1,0 +1,169 @@
+defaults:
+  timeout_seconds: 20
+  max_links: 20
+  same_domain_only: true
+  crawl_type: html_list
+  crawl:
+    source_timeout_seconds: 180
+  discovery:
+    same_domain_only: true
+    max_links: 20
+  request:
+    timeout_seconds: 20
+    retries: 2
+    retry_backoff_seconds: 1.0
+    headers:
+      Accept-Language: zh-CN,zh;q=0.9,en;q=0.8
+
+sources:
+  - slug: cn_mara_news
+    name: 中国农业农村部新闻
+    base_url: https://www.moa.gov.cn
+    category: policy
+    language: zh
+    country: CN
+    crawl_type: html_list
+    timeout_seconds: 15
+    max_links: 30
+    same_domain_only: true
+    entry_urls:
+      - https://www.moa.gov.cn/xw/
+    link_patterns:
+      - /xw/
+    exclude_patterns:
+      - javascript:
+      - /ztzl/
+    discovery:
+      max_links: 30
+    request:
+      timeout_seconds: 15
+      retries: 1
+    crawl:
+      source_timeout_seconds: 150
+
+  - slug: cn_caas_news
+    name: 中国农业科学院新闻
+    base_url: https://www.caas.cn
+    category: research
+    language: zh
+    country: CN
+    crawl_type: html_list
+    timeout_seconds: 15
+    max_links: 20
+    same_domain_only: true
+    entry_urls:
+      - https://www.caas.cn/xwzx/
+    link_patterns:
+      - /xwzx/
+    exclude_patterns:
+      - javascript:
+
+  - slug: usda_press
+    name: USDA Newsroom
+    base_url: https://www.usda.gov
+    category: policy
+    language: en
+    country: US
+    crawl_type: html_list_strict
+    timeout_seconds: 25
+    max_links: 25
+    same_domain_only: true
+    entry_urls:
+      - https://www.usda.gov/about-usda/general-information/staff-offices/office-chief-economist/newsroom
+    link_patterns:
+      - /news
+      - /media/press-releases
+    exclude_patterns:
+      - /es/
+      - /topics/
+    request:
+      headers:
+        Accept-Language: en-US,en;q=0.9
+
+  - slug: fao_newsroom
+    name: FAO Newsroom
+    base_url: https://www.fao.org
+    category: policy
+    language: en
+    country: GLOBAL
+    crawl_type: html_list_strict
+    timeout_seconds: 25
+    max_links: 25
+    same_domain_only: true
+    entry_urls:
+      - https://www.fao.org/newsroom/en
+    link_patterns:
+      - /newsroom/detail/
+    exclude_patterns:
+      - /audio/
+
+  - slug: cimmyt_news
+    name: CIMMYT News
+    base_url: https://www.cimmyt.org
+    category: research
+    language: en
+    country: GLOBAL
+    crawl_type: html_list
+    timeout_seconds: 20
+    max_links: 20
+    same_domain_only: true
+    entry_urls:
+      - https://www.cimmyt.org/news/
+    link_patterns:
+      - /news/
+    exclude_patterns:
+      - /tag/
+      - /category/
+
+  - slug: syngenta_media
+    name: Syngenta Media Releases
+    base_url: https://www.syngenta.com
+    category: company_news
+    language: en
+    country: GLOBAL
+    crawl_type: html_list_strict
+    timeout_seconds: 20
+    max_links: 20
+    same_domain_only: true
+    entry_urls:
+      - https://www.syngenta.com/media/media-releases
+    link_patterns:
+      - /media/
+    exclude_patterns:
+      - /media-library/
+
+  - slug: bayer_agriculture_news
+    name: Bayer Crop Science News
+    base_url: https://www.bayer.com
+    category: company_news
+    language: en
+    country: GLOBAL
+    crawl_type: html_list_strict
+    timeout_seconds: 20
+    max_links: 20
+    same_domain_only: true
+    entry_urls:
+      - https://www.bayer.com/en/agriculture/news-stories
+    link_patterns:
+      - /en/agriculture/
+    exclude_patterns:
+      - /products/
+
+  - slug: patents_placeholder
+    name: Patent Source Placeholder
+    base_url: https://patents.google.com
+    category: patent
+    language: en
+    country: GLOBAL
+    crawl_type: sitemap
+    timeout_seconds: 25
+    max_links: 20
+    same_domain_only: true
+    entry_urls:
+      - https://patents.google.com/
+    link_patterns:
+      - /patent/
+    exclude_patterns:
+      - /advanced
+    is_active: false
+    notes: Enable after adding a dedicated patent query connector.

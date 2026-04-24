@@ -1,0 +1,12 @@
+apscheduler<4.0,>=3.10
+beautifulsoup4<5.0,>=4.12
+fastapi<1.0,>=0.115
+ftfy<7.0,>=6.2
+httpx<1.0,>=0.27
+pydantic-settings<3.0,>=2.3
+pymupdf<2.0,>=1.24
+python-dateutil<3.0,>=2.9
+pyyaml<7.0,>=6.0
+sqlalchemy<3.0,>=2.0
+trafilatura<2.0,>=1.10
+uvicorn[standard]<1.0,>=0.30
