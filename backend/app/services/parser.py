@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from urllib.parse import urlparse
 
 import fitz
 import trafilatura
@@ -18,39 +19,60 @@ PUBLISH_META_KEYS = (
     ("meta", {"name": "article:published_time"}),
     ("meta", {"property": "og:published_time"}),
     ("meta", {"name": "og:published_time"}),
-    ("meta", {"name": "publishdate"}),
     ("meta", {"name": "pubdate"}),
+    ("meta", {"name": "PubDate"}),
+    ("meta", {"name": "publishdate"}),
+    ("meta", {"name": "publishDate"}),
     ("meta", {"name": "date"}),
     ("meta", {"name": "dc.date"}),
     ("meta", {"name": "dc.date.issued"}),
     ("meta", {"name": "citation_publication_date"}),
     ("meta", {"name": "citation_date"}),
+    ("meta", {"name": "article_date_original"}),
     ("meta", {"itemprop": "datePublished"}),
     ("meta", {"itemprop": "dateCreated"}),
 )
+MODIFIED_META_KEYS = (
+    ("meta", {"property": "article:modified_time"}),
+    ("meta", {"name": "last-modified"}),
+    ("meta", {"itemprop": "dateModified"}),
+)
 
 TITLE_META_KEYS = (
+    ("meta", {"name": "ArticleTitle"}),
+    ("meta", {"name": "articletitle"}),
     ("meta", {"property": "og:title"}),
     ("meta", {"name": "og:title"}),
     ("meta", {"name": "twitter:title"}),
     ("meta", {"name": "title"}),
+    ("meta", {"name": "citation_title"}),
+    ("meta", {"name": "dc.title"}),
     ("meta", {"itemprop": "headline"}),
 )
 
 AUTHOR_META_KEYS = (
     {"name": "author"},
+    {"name": "Author"},
     {"property": "article:author"},
     {"property": "og:site_name"},
     {"name": "application-name"},
 )
 
 CONTENT_HINT_RE = re.compile(
-    r"(article|content|main|detail|news|post|entry|body|text|read|story)",
+    r"(article|content|main|detail|news|post|entry|body|text|read|story|"
+    r"zoom|txt|font|document|doc|pages|pagecontent|articlebox|arc|"
+    r"articlecontent|trs_editor|v_news_content|content_body|info|showcontent)",
+    re.IGNORECASE,
+)
+NOISE_CONTAINER_RE = re.compile(
+    r"(nav|menu|breadcrumb|footer|aside|sidebar|share|related|recommend|hot|list|"
+    r"rank|download|attachment|comment|copyright|header|search|channel|column)",
     re.IGNORECASE,
 )
 NOISE_LINE_RE = re.compile(
     r"^(home|menu|navigation|subscribe|sign in|log in|all rights reserved|copyright|"
     r"cookie|privacy policy|terms of use|share|facebook|twitter|linkedin|wechat|weibo|"
+    r"return to top|last modified|"
     r"\u8fd4\u56de\u9876\u90e8|\u4e0a\u4e00\u7bc7|\u4e0b\u4e00\u7bc7|\u6253\u5370|"
     r"\u5173\u95ed\u7a97\u53e3|\u514d\u8d23\u58f0\u660e|\u7248\u6743\u6240\u6709|"
     r"\u7f51\u7ad9\u5730\u56fe|\u8054\u7cfb\u6211\u4eec|\u76f8\u5173\u9605\u8bfb)$",
@@ -62,6 +84,22 @@ DATE_PATTERN_RE = re.compile(
     r"(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?"
     r")"
 )
+EN_DATE_PATTERN_RE = re.compile(
+    r"(?P<date>(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
+    r"\s+\d{1,2},\s+\d{4}"
+    r"|(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4})",
+    re.IGNORECASE,
+)
+NUMERIC_DATE_PATTERN_RE = re.compile(r"(?P<date>\d{1,2}/\d{1,2}/(?:20\d{2}|19\d{2}))")
+CHINESE_TITLE_HINT_RE = re.compile(
+    r"(通知|意见|办法|方案|通报|公告|公报|简报|解读|报道|新闻|快讯|动态|研究|进展|成果|团队|专家)",
+)
+CHINESE_METADATA_LABEL_RE = re.compile(
+    r"(\u65e5\u671f|\u53d1\u5e03\u65f6\u95f4|\u53d1\u5e03\u65e5\u671f|\u4f5c\u8005|\u6765\u6e90|"
+    r"\u7f16\u8f91|\u8d23\u4efb\u7f16\u8f91|\u680f\u76ee|\u5b57\u53f7|\u6253\u5370\u672c\u9875)"
+)
+MODIFIED_HINT_RE = re.compile(r"(last modified|updated|modified)", re.IGNORECASE)
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -77,6 +115,21 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return date_parser.parse(cleaned, fuzzy=True)
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _host_of(url: str) -> str:
+    return urlparse(url).netloc.lower()
+
+
+def _is_xml_feed(fetch_result: FetchResult, html: str) -> bool:
+    content_type = (fetch_result.content_type or "").lower()
+    url = (fetch_result.final_url or fetch_result.url or "").lower()
+    head = html.lstrip()[:300].lower()
+    if any(token in content_type for token in ("xml", "rss", "atom")):
+        return True
+    if "/feed" in url or "/rss/" in url or url.endswith("/feed"):
+        return True
+    return head.startswith("<?xml") or "<rss" in head or "<feed" in head
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -119,8 +172,14 @@ def _title_score(candidate: str, site_name: str | None) -> int:
         score += 2
     if re.search(r"[\u4e00-\u9fffA-Za-z]{4,}", candidate):
         score += 2
+    if re.search(r"[\u4e00-\u9fff]", candidate):
+        score += 2
+    if CHINESE_TITLE_HINT_RE.search(candidate):
+        score += 2
     if site_name and candidate == site_name:
         score -= 5
+    if candidate in {"新闻", "最新发布", "中国农业科学", "农业农村部网站"}:
+        score -= 6
     if "|" in candidate or " - " in candidate:
         score -= 1
     return score
@@ -131,7 +190,8 @@ def _clean_title(candidate: str, site_name: str | None = None) -> str:
     if not title:
         return ""
 
-    parts = re.split(r"\s(?:\||-|_|::|/)\s", title)
+    title = re.sub(r"^\s*(?:当前位置[:：]?)", "", title).strip()
+    parts = re.split(r"\s*(?:\||-|_|::|/|｜|丨|—|–|--|>>|›|»)\s*", title)
     if len(parts) > 1:
         meaningful = [part.strip() for part in parts if 4 <= len(part.strip()) <= 180]
         if meaningful:
@@ -142,6 +202,7 @@ def _clean_title(candidate: str, site_name: str | None = None) -> str:
 
     if site_name:
         title = re.sub(rf"\s*[-|_]\s*{re.escape(site_name)}$", "", title, flags=re.IGNORECASE).strip()
+    title = re.sub(r"\s*(?:首页|新闻|资讯|正文|详情页)$", "", title).strip()
     return title[:300]
 
 
@@ -168,9 +229,17 @@ def _extract_json_ld_objects(soup: BeautifulSoup) -> list[dict]:
 
 def _extract_title(soup: BeautifulSoup) -> str:
     site_name = None
-    site_tag = soup.find("meta", attrs={"property": "og:site_name"})
-    if site_tag and site_tag.get("content"):
-        site_name = _normalize_whitespace(site_tag["content"])
+    for attrs in (
+        {"property": "og:site_name"},
+        {"name": "SiteName"},
+        {"name": "site_name"},
+        {"name": "application-name"},
+    ):
+        site_tag = soup.find("meta", attrs=attrs)
+        if site_tag and site_tag.get("content"):
+            site_name = _normalize_whitespace(site_tag["content"])
+            if site_name:
+                break
 
     candidates: list[str] = []
     for tag_name, attrs in TITLE_META_KEYS:
@@ -215,7 +284,7 @@ def _extract_publish_time(soup: BeautifulSoup) -> datetime | None:
                 return parsed
 
     for item in _extract_json_ld_objects(soup):
-        for field in ("datePublished", "dateCreated", "dateModified", "uploadDate"):
+        for field in ("datePublished", "dateCreated", "uploadDate"):
             value = item.get(field)
             if isinstance(value, str):
                 parsed = _parse_datetime(value)
@@ -228,10 +297,14 @@ def _extract_publish_time(soup: BeautifulSoup) -> datetime | None:
             return parsed
 
     selectors = soup.select(
-        "[class*='date'], [class*='time'], [class*='publish'], [id*='date'], [id*='time'], [id*='publish']"
+        "[class*='date'], [class*='time'], [class*='publish'], "
+        "[id*='date'], [id*='time'], [id*='publish']"
     )
     for node in selectors[:12]:
-        parsed = _parse_datetime(node.get_text(" ", strip=True))
+        text = node.get_text(" ", strip=True)
+        if MODIFIED_HINT_RE.search(text):
+            continue
+        parsed = _parse_datetime(text)
         if parsed:
             return parsed
 
@@ -242,11 +315,76 @@ def _extract_publish_time(soup: BeautifulSoup) -> datetime | None:
             parsed = _parse_datetime(match.group("date"))
             if parsed:
                 return parsed
+        en_match = EN_DATE_PATTERN_RE.search(chunk)
+        if en_match:
+            parsed = _parse_datetime(en_match.group("date"))
+            if parsed:
+                return parsed
+        numeric_match = NUMERIC_DATE_PATTERN_RE.search(chunk)
+        if numeric_match and not MODIFIED_HINT_RE.search(chunk):
+            parsed = _parse_datetime(numeric_match.group("date"))
+            if parsed:
+                return parsed
+
+    modified_selectors = soup.select(
+        "[class*='modify'], [class*='modified'], [id*='modify'], [id*='modified']"
+    )
+    for node in modified_selectors[:8]:
+        parsed = _parse_datetime(node.get_text(" ", strip=True))
+        if parsed:
+            return parsed
+
+    for item in _extract_json_ld_objects(soup):
+        value = item.get("dateModified")
+        if isinstance(value, str):
+            parsed = _parse_datetime(value)
+            if parsed:
+                return parsed
+
+    for tag_name, attrs in MODIFIED_META_KEYS:
+        tag = soup.find(tag_name, attrs=attrs)
+        if tag and tag.get("content"):
+            parsed = _parse_datetime(tag["content"])
+            if parsed:
+                return parsed
+    return None
+
+
+def _extract_publish_time_from_text_head(text: str) -> datetime | None:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for chunk in lines[:8]:
+        en_match = EN_DATE_PATTERN_RE.search(chunk)
+        if en_match:
+            parsed = _parse_datetime(en_match.group("date"))
+            if parsed:
+                return parsed
+        match = DATE_PATTERN_RE.search(chunk)
+        if match:
+            parsed = _parse_datetime(match.group("date"))
+            if parsed:
+                return parsed
+        numeric_match = NUMERIC_DATE_PATTERN_RE.search(chunk)
+        if numeric_match and not MODIFIED_HINT_RE.search(chunk):
+            parsed = _parse_datetime(numeric_match.group("date"))
+            if parsed:
+                return parsed
     return None
 
 
 def _extract_author_org(soup: BeautifulSoup) -> str | None:
     for attrs in AUTHOR_META_KEYS:
+        tag = soup.find("meta", attrs=attrs)
+        if tag and tag.get("content"):
+            value = _normalize_whitespace(tag["content"])
+            if value and len(value) <= 255:
+                return value
+
+    for attrs in (
+        {"name": "ContentSource"},
+        {"name": "contentSource"},
+        {"name": "source"},
+        {"property": "article:publisher"},
+    ):
         tag = soup.find("meta", attrs=attrs)
         if tag and tag.get("content"):
             value = _normalize_whitespace(tag["content"])
@@ -262,6 +400,33 @@ def _extract_author_org(soup: BeautifulSoup) -> str | None:
     return None
 
 
+def _looks_like_china_agrisci_index(url: str, soup: BeautifulSoup) -> bool:
+    host = _host_of(url)
+    if "chinaagrisci.com" not in host:
+        return False
+
+    lowered_url = url.lower()
+    if any(
+        token in lowered_url
+        for token in (
+            "showtenarticle.do",
+            "showbrowsetoplist.do",
+            "showdownloadtoplist.do",
+            "showbeiyincishutop.do",
+            "showhotarticlesimple.do",
+            "downloadarticlefile.do",
+        )
+    ):
+        return True
+
+    text = _normalize_whitespace(soup.get_text(" ", strip=True))
+    if text.count("10.3864/") >= 2:
+        return True
+    if text.count("HTML") >= 2 and text.count("PDF") >= 2 and text.count("收藏") >= 2:
+        return True
+    return False
+
+
 def _extract_main_text_fallback(soup: BeautifulSoup) -> str:
     fallback_soup = BeautifulSoup(str(soup), "html.parser")
 
@@ -270,8 +435,9 @@ def _extract_main_text_fallback(soup: BeautifulSoup) -> str:
     ):
         tag.decompose()
 
-    candidates = fallback_soup.find_all(["article", "main", "section", "div"])
+    candidates = fallback_soup.find_all(["article", "main", "section", "div", "td"])
     best_text = ""
+    best_score = -1
     for node in candidates:
         attrs = " ".join(
             value
@@ -281,11 +447,26 @@ def _extract_main_text_fallback(soup: BeautifulSoup) -> str:
             )
             if value
         )
-        if not CONTENT_HINT_RE.search(attrs) and node.name in {"section", "div"}:
+        attr_text = attrs.lower()
+        if NOISE_CONTAINER_RE.search(attr_text):
             continue
+        hinted = bool(CONTENT_HINT_RE.search(attr_text))
         text = _clean_text_lines(node.get_text("\n", strip=True))
-        if len(text) > len(best_text):
+        if len(text) < 80:
+            continue
+        score = len(text)
+        line_count = len([line for line in text.splitlines() if line.strip()])
+        if hinted:
+            score += 600
+        if node.name in {"article", "main"}:
+            score += 400
+        if 3 <= line_count <= 120:
+            score += 120
+        if CHINESE_METADATA_LABEL_RE.search(text[:120]):
+            score += 80
+        if score > best_score:
             best_text = text
+            best_score = score
 
     if len(best_text) >= 80:
         return best_text
@@ -305,7 +486,37 @@ def _is_low_quality_content(text: str) -> bool:
 
 def parse_html(fetch_result: FetchResult) -> ParsedDocument:
     html = fetch_result.text or ""
+    if _is_xml_feed(fetch_result, html):
+        return ParsedDocument(
+            title="Feed or XML document",
+            url=fetch_result.final_url,
+            publish_time=None,
+            content_text="",
+            author_org=None,
+            metadata={
+                "content_type": fetch_result.content_type,
+                "extraction_method": "feed_blocked",
+                "content_length": 0,
+                "parse_warning": "feed_xml_detected",
+            },
+        )
+
     soup = BeautifulSoup(html, "html.parser")
+    if _looks_like_china_agrisci_index(fetch_result.final_url, soup):
+        return ParsedDocument(
+            title="Listing or non-article page",
+            url=fetch_result.final_url,
+            publish_time=None,
+            content_text="",
+            author_org=None,
+            metadata={
+                "content_type": fetch_result.content_type,
+                "extraction_method": "non_article_blocked",
+                "content_length": 0,
+                "parse_warning": "non_article_page",
+            },
+        )
+
     title = _extract_title(soup)
     publish_time = _extract_publish_time(soup)
     author_org = _extract_author_org(soup)
@@ -327,6 +538,13 @@ def parse_html(fetch_result: FetchResult) -> ParsedDocument:
     elif not primary_text:
         content_text = fallback_text
         use_fallback = True
+
+    host = _host_of(fetch_result.final_url)
+    lowered_url = (fetch_result.final_url or "").lower()
+    if "ars.usda.gov" in host and "/news-events/news/research-news/" in lowered_url:
+        text_head_publish_time = _extract_publish_time_from_text_head(content_text)
+        if text_head_publish_time and (publish_time is None or text_head_publish_time < publish_time):
+            publish_time = text_head_publish_time
 
     title = fix_text(title)
     content_text = fix_text(content_text)

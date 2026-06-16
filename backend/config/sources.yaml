@@ -17,29 +17,28 @@ defaults:
 
 sources:
   - slug: cn_mara_news
-    name: 中国农业农村部新闻
+    name: 中国农业农村部信息公开
     base_url: https://www.moa.gov.cn
     category: policy
     language: zh
     country: CN
-    crawl_type: html_list
-    timeout_seconds: 15
-    max_links: 30
+    crawl_type: html_list_strict
+    timeout_seconds: 45
+    max_links: 60
     same_domain_only: true
     entry_urls:
       - https://www.moa.gov.cn/xw/
     link_patterns:
       - /xw/
     exclude_patterns:
-      - javascript:
+      - "javascript:"
       - /ztzl/
-    discovery:
-      max_links: 30
-    request:
-      timeout_seconds: 15
-      retries: 1
-    crawl:
-      source_timeout_seconds: 150
+      - /xw/shipin/
+      - /xw/tpxw
+      - /nybgb/
+      - /xw/index.htm
+      - /xw/index.html
+    notes: 中文农业政策核心来源；本轮收紧发现规则，优先过滤频道/目录/视频页，降低误抓。
 
   - slug: cn_caas_news
     name: 中国农业科学院新闻
@@ -56,46 +55,45 @@ sources:
     link_patterns:
       - /xwzx/
     exclude_patterns:
-      - javascript:
+      - "javascript:"
 
-  - slug: usda_press
-    name: USDA Newsroom
-    base_url: https://www.usda.gov
-    category: policy
-    language: en
-    country: US
-    crawl_type: html_list_strict
-    timeout_seconds: 25
-    max_links: 25
+  - slug: china_agrisci
+    name: 中国农业科学
+    base_url: https://www.chinaagrisci.com
+    category: research
+    language: zh
+    country: CN
+    crawl_type: html_list
+    is_active: false
+    timeout_seconds: 60
+    max_links: 50
     same_domain_only: true
     entry_urls:
-      - https://www.usda.gov/about-usda/general-information/staff-offices/office-chief-economist/newsroom
+      - https://www.chinaagrisci.com/CN/article/showTenArticle.do
     link_patterns:
-      - /news
-      - /media/press-releases
+      - /CN/10.3864/
     exclude_patterns:
-      - /es/
-      - /topics/
-    request:
-      headers:
-        Accept-Language: en-US,en;q=0.9
+      - download
+      - showDownloadTopList
+    notes: 当前环境入口持续 403，临时停用避免影响每日主流程；待网络可达后再恢复。
 
-  - slug: fao_newsroom
-    name: FAO Newsroom
-    base_url: https://www.fao.org
-    category: policy
+  - slug: agrirxiv_preprints
+    name: agriRxiv
+    base_url: https://agrirxiv.org
+    category: research
     language: en
     country: GLOBAL
-    crawl_type: html_list_strict
-    timeout_seconds: 25
-    max_links: 25
+    crawl_type: rss
+    is_active: false
+    timeout_seconds: 30
+    max_links: 50
     same_domain_only: true
     entry_urls:
-      - https://www.fao.org/newsroom/en
-    link_patterns:
-      - /newsroom/detail/
+      - https://agrirxiv.org/feed/
     exclude_patterns:
-      - /audio/
+      - /category/
+      - /feed
+    notes: 农业预印本来源；当前环境下域名解析失败，先保留配置并暂不启用，待网络可达后再恢复。
 
   - slug: cimmyt_news
     name: CIMMYT News
@@ -114,6 +112,88 @@ sources:
     exclude_patterns:
       - /tag/
       - /category/
+
+  - slug: usda_press
+    name: USDA Newsroom
+    base_url: https://www.usda.gov
+    category: policy
+    language: en
+    country: US
+    crawl_type: html_list_strict
+    timeout_seconds: 20
+    max_links: 10
+    same_domain_only: true
+    entry_urls:
+      - https://www.usda.gov/about-usda/general-information/staff-offices/office-chief-economist/newsroom
+    link_patterns:
+      - /about-usda/general-information/staff-offices/office-chief-economist/newsroom/
+    exclude_patterns:
+      - /es/
+      - /topics/
+      - /about-usda/news/
+      - /about-usda/news/blog
+      - /about-usda/news/press-releases
+      - /media/press-releases/
+    request:
+      retries: 1
+      headers:
+        Accept-Language: en-US,en;q=0.9
+
+  - slug: usda_ars_news
+    name: USDA ARS Research News
+    base_url: https://www.ars.usda.gov
+    category: policy
+    language: en
+    country: US
+    crawl_type: rss
+    timeout_seconds: 30
+    max_links: 30
+    same_domain_only: true
+    entry_urls:
+      - https://www.ars.usda.gov/rss/?productName=Research+News
+    link_patterns:
+      - /news-events/news/research-news/
+    exclude_patterns:
+      - /rss/
+    notes: 官方 RSS 源；优先作为英文政策/科研稳定输入。
+
+  - slug: fao_newsroom
+    name: FAO Newsroom
+    base_url: https://www.fao.org
+    category: policy
+    language: en
+    country: GLOBAL
+    crawl_type: html_list_strict
+    timeout_seconds: 25
+    max_links: 25
+    same_domain_only: true
+    entry_urls:
+      - https://www.fao.org/newsroom/en
+    link_patterns:
+      - /newsroom/detail/
+    exclude_patterns:
+      - /audio/
+
+  - slug: agfundernews_global
+    name: AgFunderNews
+    base_url: https://agfundernews.com
+    category: company_news
+    language: en
+    country: GLOBAL
+    crawl_type: rss
+    timeout_seconds: 30
+    max_links: 50
+    same_domain_only: true
+    entry_urls:
+      - https://agfundernews.com/feed
+    exclude_patterns:
+      - /feed
+      - /feed/
+      - ?output=feed
+      - /category/
+      - /tag/
+      - /wp-content/
+    notes: 全球农业科技创投高价值媒体；RSS 只做发现，继续屏蔽 feed 类脏链接。
 
   - slug: syngenta_media
     name: Syngenta Media Releases
@@ -166,4 +246,4 @@ sources:
     exclude_patterns:
       - /advanced
     is_active: false
-    notes: Enable after adding a dedicated patent query connector.
+    notes: 占位来源；后续接 Lens.org 或 WIPO API connector 后再替换。

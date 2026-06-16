@@ -76,6 +76,13 @@ ASSET_EXTENSIONS = (
     ".mp4",
     ".mp3",
 )
+LIST_PAGE_MARKERS = (
+    "/index.html",
+    "/index.htm",
+    "/list.html",
+    "/list.htm",
+    "/channel/",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -175,6 +182,19 @@ def _clean_tracking_query(url: str) -> str:
     return urlunparse(parsed._replace(query=urlencode(filtered, doseq=True)))
 
 
+def _canonicalize_source_url(source: Source, url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host not in {"ars.usda.gov", "www.ars.usda.gov"}:
+        return url
+
+    if "/news-events/news/research-news/" not in parsed.path.lower():
+        return url
+
+    canonical_host = url_host(source.base_url) or parsed.netloc
+    return urlunparse(parsed._replace(scheme="https", netloc=canonical_host))
+
+
 def _has_article_signal(path: str) -> bool:
     lower_path = path.lower()
     segments = [segment for segment in lower_path.split("/") if segment]
@@ -183,7 +203,9 @@ def _has_article_signal(path: str) -> bool:
     last = segments[-1]
     if last.endswith(".pdf"):
         return True
-    if re.search(r"/20\d{2}/", lower_path):
+    if re.search(r"/20\d{2}(?:\d{2})?/", lower_path):
+        return True
+    if re.search(r"/t20\d{6}_\d+\.htm", lower_path):
         return True
     if any(token in segments for token in ("news", "detail", "article", "story", "press-releases")):
         return True
@@ -208,6 +230,10 @@ def _is_useful_link(url: str, crawl_type: str, anchor_text: str) -> bool:
     parsed = urlparse(url)
     path = parsed.path.lower()
     if any(path.endswith(ext) for ext in ASSET_EXTENSIONS):
+        return False
+    if any(marker in path for marker in LIST_PAGE_MARKERS):
+        return False
+    if re.search(r"/(xw|nybgb)(/20\d{2})?/?$", path):
         return False
 
     if crawl_type == "html_list_strict":
@@ -250,7 +276,10 @@ def discover_links(client: httpx.Client, source: Source, deadline: float | None 
 
     if crawl_type == "direct":
         for entry_url in entry_urls:
-            normalized = _clean_tracking_query(normalize_url(source.base_url, entry_url))
+            normalized = _canonicalize_source_url(
+                source,
+                _clean_tracking_query(normalize_url(source.base_url, entry_url)),
+            )
             if normalized in seen:
                 continue
             seen.add(normalized)
@@ -292,7 +321,10 @@ def discover_links(client: httpx.Client, source: Source, deadline: float | None 
             if not _is_supported_href(href):
                 continue
 
-            normalized = _clean_tracking_query(normalize_url(entry_url, href))
+            normalized = _canonicalize_source_url(
+                source,
+                _clean_tracking_query(normalize_url(entry_url, href)),
+            )
             parsed = urlparse(normalized)
             if parsed.scheme not in ("http", "https"):
                 continue

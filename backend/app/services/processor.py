@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from urllib.parse import urlparse
 
 from ftfy import fix_text
 
@@ -175,11 +176,66 @@ LEADING_METADATA_RE = re.compile(
     r"(?:20\d{2}|19\d{2})[-/.]\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?"
     r"|published\s*:?.*"
     r"|updated\s*:?.*"
+    r"|last modified\s*:?.*"
     r"|source\s*:?.*"
+    r"|doi\s*:?.*"
+    r"|\u65e5\u671f\s*:?.*"
+    r"|\u66f4\u65b0\u65f6\u95f4\s*:?.*"
+    r"|\u4fee\u6539\u65f6\u95f4\s*:?.*"
     r"|\u53d1\u5e03\u65f6\u95f4\s*:?.*"
     r"|\u53d1\u5e03\u65e5\u671f\s*:?.*"
     r"|\u6765\u6e90\s*:?.*"
+    r"|\u4f5c\u8005\s*:?.*"
+    r"|\u7f16\u8f91\s*:?.*"
+    r"|\u8d23\u4efb\u7f16\u8f91\s*:?.*"
+    r"|\u680f\u76ee\s*:?.*"
+    r"|\u94fe\u63a5\u672c\u6587\s*:?.*"
     r")$",
+    re.IGNORECASE,
+)
+METADATA_LABEL_RE = re.compile(
+    r"(\u6765\u6e90|\u65e5\u671f|\u53d1\u5e03\u65f6\u95f4|\u53d1\u5e03\u65e5\u671f|\u4f5c\u8005|"
+    r"\u7f16\u8f91|\u8d23\u4efb\u7f16\u8f91|\u680f\u76ee|\u5b57\u53f7|\u6253\u5370\u672c\u9875|"
+    r"\u5173\u95ed\u7a97\u53e3|\u94fe\u63a5\u672c\u6587|doi|last modified|updated)",
+    re.IGNORECASE,
+)
+ATTACHMENT_LINE_RE = re.compile(
+    r"^(?:\u9644\u4ef6(?:\u4e0b\u8f7d)?|\u4e0b\u8f7d|\u76f8\u5173\u9644\u4ef6|"
+    r"\u9644\u4ef61?[\u3001:\uff1a].*|attachment(?:s)?\s*:?.*)$",
+    re.IGNORECASE,
+)
+MARA_SHIPIN_NOISE_LINE_RE = re.compile(
+    r"^(?:English|\u65e0\u969c\u788d|\u519c\u4e1a\u519c\u6751\u90e8\u90ae\u7bb1|"
+    r"\u4e2d\u56fd\u519c\u4e1a\u519c\u6751\u4fe1\u606f\u7f51|\u653f\u52a1\u670d\u52a1|"
+    r"\u4e1a\u52a1\u7ba1\u7406|\u5f53\u524d\u4f4d\u7f6e[:\uff1a]?|>\s*\S+|"
+    r"\u60a8\u4f7f\u7528\u7684\u6d4f\u89c8\u5668\u4e0d\u652f\u6301.*javascript.*|"
+    r"\[video:.*\]|\u63d0\u793a\u4fe1\u606f|\u60a8\u5373\u5c06\u79bb\u5f00.*|"
+    r"\u786e\s*\u5b9a|\u53d6\s*\u6d88|\u65e5\u671f[:\uff1a]?|\u6765\u6e90[:\uff1a]?)$",
+    re.IGNORECASE,
+)
+MARA_SHIPIN_NOISE_TOKEN_RE = re.compile(
+    r"(?:English|\u65e0\u969c\u788d|\u519c\u4e1a\u519c\u6751\u90e8\u90ae\u7bb1|"
+    r"\u4e2d\u56fd\u519c\u4e1a\u519c\u6751\u4fe1\u606f\u7f51|\u653f\u52a1\u670d\u52a1|"
+    r"\u4e1a\u52a1\u7ba1\u7406|\u5f53\u524d\u4f4d\u7f6e|\u63d0\u793a\u4fe1\u606f|"
+    r"javascript|\[video:|\u786e\s*\u5b9a|\u53d6\s*\u6d88)",
+    re.IGNORECASE,
+)
+MARA_BREADCRUMB_LINE_RE = re.compile(
+    r"^(?:当前位置[:：]?\s*.*|首页\s*[>/＞]\s*.*|新闻\s*[>/＞]\s*.*|"
+    r"(?:部门动态|政务动态|工作动态|行业动态|新闻资讯|图片新闻|视频)\s*(?:[>/＞].*)?)$",
+    re.IGNORECASE,
+)
+MARA_BREADCRUMB_TOKEN_RE = re.compile(
+    r"(?:当前位置|部门动态|政务动态|工作动态|行业动态|新闻资讯|图片新闻|面包屑)",
+    re.IGNORECASE,
+)
+
+AGFUNDER_FEED_PATH_RE = re.compile(r"(^/feed/?$)|(/feed/?)$", re.IGNORECASE)
+AGFUNDER_HOME_TITLE_RE = re.compile(r"^(home|homepage|agfunder news)$", re.IGNORECASE)
+MARA_NOISE_PATH_RE = re.compile(
+    r"^/xw/shipin(?:/|$)"
+    r"|^/xw/tpxw(?:\d{8})?(?:/|$)"
+    r"|^/nybgb/\d{4}/\d{6}/?$",
     re.IGNORECASE,
 )
 
@@ -430,6 +486,8 @@ def _is_noise_line(line: str) -> bool:
         return True
     if NOISE_LINE_RE.match(normalized):
         return True
+    if ATTACHMENT_LINE_RE.match(normalized):
+        return True
     if len(normalized) <= 2:
         return True
     if normalized.count("|") >= 3 or normalized.count("/") >= 4:
@@ -455,6 +513,80 @@ def _clean_content_text(text: str) -> str:
     return cleaned.strip()
 
 
+def _clean_mara_shipin_text(text: str) -> tuple[str, int]:
+    lines: list[str] = []
+    removed = 0
+    for raw_line in text.splitlines():
+        line = _normalize_line(raw_line)
+        if not line:
+            continue
+        if MARA_SHIPIN_NOISE_LINE_RE.match(line):
+            removed += 1
+            continue
+        if MARA_SHIPIN_NOISE_TOKEN_RE.search(line) and len(line) <= 80:
+            removed += 1
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip(), removed
+
+
+def _clean_mara_general_text(text: str) -> tuple[str, int]:
+    lines: list[str] = []
+    removed = 0
+    for raw_line in text.splitlines():
+        line = _normalize_line(raw_line)
+        if not line:
+            continue
+        if "当前位置" in line and len(line) <= 160 and any(marker in line for marker in (">", "＞", "›", "首页", "新闻", "动态")):
+            removed += 1
+            continue
+        if MARA_BREADCRUMB_LINE_RE.match(line):
+            removed += 1
+            continue
+        if line.startswith("当前位置") and len(line) <= 120:
+            removed += 1
+            continue
+        if (" > " in line or "＞" in line or "›" in line) and len(line) <= 120:
+            token_hits = len(MARA_BREADCRUMB_TOKEN_RE.findall(line))
+            if token_hits >= 1:
+                removed += 1
+                continue
+        lines.append(line)
+    return "\n".join(lines).strip(), removed
+
+
+def _filter_source_keywords(keywords: list[str], source_slug: str) -> list[str]:
+    if source_slug != "cn_mara_news":
+        return keywords
+    filtered: list[str] = []
+    for keyword in keywords:
+        normalized = _normalize_line(keyword)
+        if not normalized:
+            continue
+        if MARA_BREADCRUMB_TOKEN_RE.search(normalized):
+            continue
+        if normalized in {"新闻", "首页", "当前位置"}:
+            continue
+        filtered.append(keyword)
+    return filtered
+
+
+def _clean_source_summary(summary: str, source_slug: str) -> str:
+    if source_slug != "cn_mara_news":
+        return summary
+    cleaned = summary.strip()
+    cleaned = re.sub(
+        r"^(?:当前位置[:：]?\s*.*?(?:\s+|[>＞›/]+)|"
+        r"(?:首页|新闻|部门动态|政务动态|工作动态)\s*[>＞›/]+\s*)+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    if MARA_BREADCRUMB_TOKEN_RE.search(cleaned) and len(cleaned) <= 80:
+        return ""
+    return cleaned
+
+
 def _strip_leading_title(title: str, content_text: str) -> str:
     lines = [line for line in content_text.splitlines()]
     while lines and _normalize_line(lines[0]) == _normalize_line(title):
@@ -465,46 +597,105 @@ def _strip_leading_title(title: str, content_text: str) -> str:
 def _strip_leading_metadata_lines(content_text: str) -> str:
     lines = [line for line in content_text.splitlines()]
     removed = 0
-    while lines and removed < 2 and LEADING_METADATA_RE.match(_normalize_line(lines[0])):
-        lines.pop(0)
-        removed += 1
+    while lines and removed < 4:
+        first = _normalize_line(lines[0])
+        label_hits = METADATA_LABEL_RE.findall(first)
+        if LEADING_METADATA_RE.match(first) or (
+            len(label_hits) >= 2 and len(first) <= 140 and not re.search(r"[。！？!?]$", first)
+        ):
+            lines.pop(0)
+            removed += 1
+            continue
+        break
     return "\n".join(lines).strip()
 
 
-def _detect_parse_status(title: str, content_text: str) -> tuple[str, str | None]:
+def _detect_parse_status(
+    title: str,
+    content_text: str,
+    metadata: dict | None = None,
+    source_slug: str | None = None,
+    url: str | None = None,
+) -> tuple[str, str | None]:
     normalized = re.sub(r"\s+", " ", content_text).strip()
     line_count = len([line for line in content_text.splitlines() if line.strip()])
+    metadata = metadata or {}
+    url_path = urlparse(url or "").path.lower()
+    source_slug = (source_slug or "").lower()
+
+    if source_slug == "agfundernews_global":
+        if AGFUNDER_FEED_PATH_RE.search(url_path):
+            return "needs_review", "agfunder_feed_or_aggregate"
+        if not url_path or url_path == "/" or AGFUNDER_HOME_TITLE_RE.match(title.strip()):
+            return "needs_review", "agfunder_homepage"
+
+    if source_slug == "cn_mara_news":
+        if MARA_NOISE_PATH_RE.search(url_path):
+            return "needs_review", "mara_directory_or_channel_page"
+        if len(normalized) < 220 and line_count <= 3:
+            return "needs_review", "mara_sparse_page"
+
     if len(normalized) < 80:
         return "needs_review", "content_too_short"
     if line_count <= 2 and len(normalized) < 160:
         return "needs_review", "content_structure_too_sparse"
     if title.lower() in {"untitled", "untitled pdf"}:
         return "needs_review", "title_missing"
+    if source_slug == "cn_mara_news":
+        removed_noise_lines = int(metadata.get("mara_removed_noise_lines", 0) or 0)
+        residual_noise_hits = int(metadata.get("mara_residual_noise_hits", 0) or 0)
+        if "/shipin/" in (url or ""):
+            if removed_noise_lines >= 6 and len(normalized) < 260:
+                return "needs_review", "mara_shipin_high_noise"
+            if residual_noise_hits >= 2:
+                return "needs_review", "mara_shipin_residual_noise"
+            if line_count <= 2 and len(normalized) < 120:
+                return "needs_review", "mara_shipin_metadata_only"
     return "ok", None
 
 
 def process_document(parsed: ParsedDocument, source: Source) -> ProcessedDocument:
+    metadata = dict(parsed.metadata or {})
     content_text = _clean_content_text(parsed.content_text)
     title = _normalize_line(parsed.title) or "Untitled"
     content_text = _strip_leading_title(title, content_text)
     content_text = _strip_leading_metadata_lines(content_text)
     content_text = _strip_leading_title(title, content_text)
+    if source.slug == "cn_mara_news":
+        content_text, removed_general_noise_lines = _clean_mara_general_text(content_text)
+        metadata["mara_removed_general_noise_lines"] = removed_general_noise_lines
+    if source.slug == "cn_mara_news" and "/shipin/" in (parsed.url or ""):
+        content_text, removed_noise_lines = _clean_mara_shipin_text(content_text)
+        content_text = _strip_leading_title(title, content_text)
+        content_text = _strip_leading_metadata_lines(content_text)
+        metadata["mara_removed_noise_lines"] = removed_noise_lines
+        metadata["mara_residual_noise_hits"] = len(MARA_SHIPIN_NOISE_TOKEN_RE.findall(content_text))
     author_org = _normalize_line(parsed.author_org) if parsed.author_org else None
     language = _normalize_language_code(parsed.language) or infer_language(content_text or parsed.title, source.language)
     summary_source = parsed.summary or content_text or parsed.title
-    summary = build_summary(summary_source)
-    keywords = _merge_keyword_lists(
+    summary = _clean_source_summary(build_summary(summary_source), source.slug)
+    keywords = _filter_source_keywords(
+        _merge_keyword_lists(
         extract_keywords(content_text, limit=6),
         extract_keywords(title, limit=3),
         limit=8,
+        ),
+        source.slug,
     )
     content_hash = sha256_text(_normalize_for_hash(content_text))
 
-    metadata = dict(parsed.metadata or {})
-    parse_status, parse_warning = _detect_parse_status(title, content_text)
+    parse_status, parse_warning = _detect_parse_status(
+        title,
+        content_text,
+        metadata=metadata,
+        source_slug=source.slug,
+        url=parsed.url,
+    )
     metadata["content_length"] = len(content_text)
     metadata["line_count"] = len([line for line in content_text.splitlines() if line.strip()])
     metadata["parse_status"] = parse_status
+    if source.slug == "cn_mara_news" and "/shipin/" in (parsed.url or ""):
+        metadata["mara_shipin_page"] = True
     if parse_warning and not metadata.get("parse_warning"):
         metadata["parse_warning"] = parse_warning
 

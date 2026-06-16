@@ -21,7 +21,14 @@ def _as_dict(value: Any) -> dict[str, Any]:
 
 def _as_list(value: Any) -> list[str]:
     if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
+        cleaned: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                continue
+            text = str(item).strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     return []

@@ -6,6 +6,7 @@ from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -83,6 +84,7 @@ def _save_raw_artifacts(source: Source, title: str, html: str | None, text: str,
 def crawl_source(session: Session, source: Source) -> int:
     saved_count = 0
     source_timed_out = False
+    seen_urls_in_run: set[str] = set()
     crawl_job = CrawlJob(source_id=source.id, job_type="crawl", status="running")
     session.add(crawl_job)
     session.commit()
@@ -110,9 +112,24 @@ def crawl_source(session: Session, source: Source) -> int:
                         source=source,
                         timeout_override=remaining_seconds,
                     )
+                    final_url = fetch_result.final_url
+                    if final_url in seen_urls_in_run:
+                        continue
+                    existing_final_url = session.scalar(select(Document).where(Document.url == final_url))
+                    if existing_final_url is not None:
+                        seen_urls_in_run.add(final_url)
+                        continue
+
                     parsed = parse_fetch_result(fetch_result)
                     processed = process_document(parsed, source)
                     if len(processed.content_text) < 80:
+                        continue
+
+                    if processed.url in seen_urls_in_run:
+                        continue
+                    existing_processed_url = session.scalar(select(Document).where(Document.url == processed.url))
+                    if existing_processed_url is not None:
+                        seen_urls_in_run.add(processed.url)
                         continue
 
                     existing_hash = session.scalar(
@@ -155,7 +172,17 @@ def crawl_source(session: Session, source: Source) -> int:
                     )
                     session.add(raw_record)
                     session.commit()
+                    seen_urls_in_run.add(processed.url)
                     saved_count += 1
+                except IntegrityError as exc:
+                    logger.warning(
+                        "Skipped duplicate document for source %s url=%s error=%s",
+                        source.slug,
+                        item.url,
+                        exc.__class__.__name__,
+                    )
+                    session.rollback()
+                    continue
                 except Exception as exc:
                     logger.warning("Failed to process link %s for source %s: %s", item.url, source.slug, exc)
                     session.rollback()
